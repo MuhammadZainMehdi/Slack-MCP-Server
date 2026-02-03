@@ -1,0 +1,6 @@
+# requirements.txt
+
+mcp>=1.9.4            # FastMCP + the full MCP SDK (pulls in starlette automatically)
+uvicorn>=0.27.0       # ASGI server — runs the app on the PORT Railway gives you
+slack-sdk>=3.21.0     # Slack WebClient
+python-dotenv>=1.0.0  # loads .env locally (harmless no-op on Railway)
