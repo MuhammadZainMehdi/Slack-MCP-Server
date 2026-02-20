@@ -1,1 +1,1 @@
-web: python mcp_server.py
+web: python oauth_server.py
