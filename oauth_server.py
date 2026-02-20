@@ -49,7 +49,8 @@ def get_auth_url(state: str) -> str:
         "chat:write",
         "groups:read",
         "groups:history",
-        "search:read",
+        "search:read.public",
+        "search:read.users",
         "users:read",
     ]
 
