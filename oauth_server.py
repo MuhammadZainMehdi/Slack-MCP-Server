@@ -41,10 +41,22 @@ def generate_state(team_id: Optional[str] = None) -> str:
 
 def get_auth_url(state: str) -> str:
     """Generate Slack OAuth authorization URL."""
-    # Minimal bot token scopes
+    # Scopes based on slack_tools.py and oauth_server.py API calls:
+    # - conversations_list -> channels:read, groups:read
+    # - conversations_join -> channels:join
+    # - conversations_history -> channels:history, groups:history
+    # - chat_postMessage -> chat:write
+    # - conversations_replies -> channels:history, groups:history
+    # - search_messages -> search:read
+    # - users_info -> users:read
     bot_scopes = [
         "channels:read",
+        "channels:history",
+        "channels:join",
         "chat:write",
+        "groups:read",
+        "groups:history",
+        "search:read",
         "users:read",
     ]
 
