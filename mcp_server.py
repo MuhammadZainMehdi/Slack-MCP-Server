@@ -214,7 +214,8 @@ async def thread_followup(channel: str, thread_ts: str):
 import os
 import uvicorn
 
+app = mcp.streamable_http_app()
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    app = mcp.streamable_http_app()
     uvicorn.run(app, host="0.0.0.0", port=port)
