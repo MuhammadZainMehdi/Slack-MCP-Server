@@ -43,31 +43,29 @@ def get_auth_url(state: str) -> str:
     """Generate Slack OAuth authorization URL."""
     # Bot token scopes - required for MCP server operations
     bot_scopes = [
-        "channels:read",  # List public channels
-        "channels:history",  # Read channel messages
-        "channels:join",  # Auto-join channels
-        "chat:write",  # Post messages
-        "groups:read",  # List private channels
-        "groups:history",  # Read private channel messages
-        "im:read",  # List DMs
-        "im:history",  # Read DM history
-        "im:write",  # Send DMs
-        "mpim:read",  # List group DMs
-        "mpim:history",  # Read group DM history
-        "mpim:write",  # Send group DMs
-        "search:read",  # Search messages
-        "users:read",  # Get user info
-        "users:read.email",  # Get user emails
-        "team:read",  # Get team info
-        "reactions:read",  # Read reactions
-        "reactions:write",  # Add reactions
+        "channels:read",
+        "channels:history",
+        "channels:join",
+        "chat:write",
+        "groups:read",
+        "groups:history",
+        "im:read",
+        "im:history",
+        "im:write",
+        "mpim:read",
+        "mpim:history",
+        "mpim:write",
+        "search:read",
+        "users:read",
+        "users:read.email",
+        "team:read",
+        "reactions:read",
+        "reactions:write",
     ]
 
-    # User scopes - for identifying the user
+    # User scopes - for identifying the user (simplified)
     user_scopes = [
-        "identity.basic",
-        "identity.email",
-        "identity.avatar",
+        "users:read",
     ]
 
     url = (
