@@ -45,28 +45,20 @@ def get_auth_url(state: str) -> str:
     bot_scopes = [
         "channels:read",
         "channels:history",
-        "channels:join",
         "chat:write",
         "groups:read",
         "groups:history",
         "im:read",
         "im:history",
-        "im:write",
         "mpim:read",
         "mpim:history",
-        "mpim:write",
         "search:read",
         "users:read",
         "users:read.email",
-        "team:read",
-        "reactions:read",
-        "reactions:write",
     ]
 
-    # User scopes - for identifying the user (simplified)
-    user_scopes = [
-        "users:read",
-    ]
+    # User scopes - keep minimal
+    user_scopes = []
 
     url = (
         f"https://slack.com/oauth/v2/authorize?"
