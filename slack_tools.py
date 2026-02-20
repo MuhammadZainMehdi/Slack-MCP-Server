@@ -4,33 +4,63 @@ import os
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 from dotenv import load_dotenv
-from typing import List, Dict
+from typing import List, Dict, Optional
 import random
 
 load_dotenv()
 
-# Initialize Slack client with Bot Token
-slack_token = os.environ.get("SLACK_USER_TOKEN")
-slack_bot_token = os.environ.get("SLACK_BOT_TOKEN")
-if not slack_token:
-    raise ValueError("SLACK_USER_TOKEN environment variable not set")
+# Default tokens (for single-user mode / backwards compatibility)
+default_slack_token = os.environ.get("SLACK_USER_TOKEN")
+default_slack_bot_token = os.environ.get("SLACK_BOT_TOKEN")
 
-client = WebClient(token=slack_token)
-bot_client = WebClient(token=slack_bot_token)
+# Global clients (for single-user mode)
+if default_slack_token:
+    client = WebClient(token=default_slack_token)
+else:
+    client = None
+
+if default_slack_bot_token:
+    bot_client = WebClient(token=default_slack_bot_token)
+else:
+    bot_client = None
 
 
-def list_channels(types: str = "public_channel,private_channel") -> List[Dict]:
+def get_client(user_token: Optional[str] = None) -> WebClient:
+    """Get Slack client - use user token if provided, otherwise use default."""
+    if user_token:
+        return WebClient(token=user_token)
+    if client:
+        return client
+    raise ValueError(
+        "SLACK_USER_TOKEN environment variable not set and no user token provided"
+    )
+
+
+def get_bot_client(bot_token: Optional[str] = None) -> Optional[WebClient]:
+    """Get Slack bot client - use provided token or default."""
+    if bot_token:
+        return WebClient(token=bot_token)
+    if bot_client:
+        return bot_client
+    return None
+
+
+def list_channels(
+    types: str = "public_channel,private_channel", user_token: Optional[str] = None
+) -> List[Dict]:
     """
     Returns a list of channels the bot has access to.
 
     Parameters:
     - types (str): Channel types to include (default: public & private)
+    - user_token (Optional[str]): User's Slack token for multi-user mode
 
     Returns:
     - List of dictionaries with 'id' and 'name' of channels
     """
     try:
-        response = client.conversations_list(types=types)
+        c = get_client(user_token)
+        response = c.conversations_list(types=types)
         channels = response.get("channels", [])
         return [{"id": c["id"], "name": c["name"]} for c in channels]
 
@@ -40,7 +70,7 @@ def list_channels(types: str = "public_channel,private_channel") -> List[Dict]:
         raise ValueError(f"Failed to list channels: {str(e)}")
 
 
-def get_channel_id(channel: str) -> str:
+def get_channel_id(channel: str, user_token: Optional[str] = None) -> str:
     """
     Converts a channel name (e.g., #general) or ID to the channel ID.
     """
@@ -54,7 +84,7 @@ def get_channel_id(channel: str) -> str:
         return channel
 
     # Map name to ID
-    channels = list_channels()
+    channels = list_channels(user_token=user_token)
     for c in channels:
         if c["name"] == channel_name:
             return c["id"]
@@ -62,12 +92,13 @@ def get_channel_id(channel: str) -> str:
     raise ValueError(f"Channel '{channel}' not found or bot is not a member.")
 
 
-def join_channel_if_needed(channel_id: str):
+def join_channel_if_needed(channel_id: str, user_token: Optional[str] = None):
     """
     Joins a public channel if the bot is not already in it.
     """
     try:
-        client.conversations_join(channel=channel_id)
+        c = get_client(user_token)
+        c.conversations_join(channel=channel_id)
     except SlackApiError as e:
         if e.response["error"] == "method_not_supported_for_channel_type":
             # Private channel - bot must be invited
@@ -78,23 +109,27 @@ def join_channel_if_needed(channel_id: str):
             raise
 
 
-def get_channel_messages(channel: str, limit: int = 50) -> List[str]:
+def get_channel_messages(
+    channel: str, limit: int = 50, user_token: Optional[str] = None
+) -> List[str]:
     """
     Fetches messages from a given Slack channel by name or ID.
 
     Parameters:
     - channel (str): Slack channel ID or name (with or without #)
     - limit (int): Number of messages to fetch (default 50)
+    - user_token (Optional[str]): User's Slack token for multi-user mode
 
     Returns:
     - List of message strings in chronological order
     """
     try:
-        channel_id = get_channel_id(channel)
+        channel_id = get_channel_id(channel, user_token)
         # Attempt to join public channels if not already in
-        join_channel_if_needed(channel_id)
+        join_channel_if_needed(channel_id, user_token)
 
-        response = client.conversations_history(channel=channel_id, limit=limit)
+        c = get_client(user_token)
+        response = c.conversations_history(channel=channel_id, limit=limit)
         messages = response.get("messages", [])
         messages.reverse()  # chronological order
         return [msg.get("text", "") for msg in messages]
@@ -109,22 +144,24 @@ def get_channel_messages(channel: str, limit: int = 50) -> List[str]:
         raise ValueError(f"Failed to fetch messages: {str(e)}")
 
 
-def post_message(channel: str, message: str) -> Dict:
+def post_message(channel: str, message: str, user_token: Optional[str] = None) -> Dict:
     """
     Posts a message to a Slack channel.
 
     Parameters:
     - channel (str): Slack channel ID or name (with or without #)
     - message (str): Message text to post
+    - user_token (Optional[str]): User's Slack token for multi-user mode
 
     Returns:
     - Dictionary with channel and timestamp of posted message
     """
     try:
-        channel_id = get_channel_id(channel)
-        join_channel_if_needed(channel_id)
+        channel_id = get_channel_id(channel, user_token)
+        join_channel_if_needed(channel_id, user_token)
 
-        response = client.chat_postMessage(channel=channel_id, text=message)
+        c = get_client(user_token)
+        response = c.chat_postMessage(channel=channel_id, text=message)
 
         return {
             "channel": channel,
@@ -139,32 +176,34 @@ def post_message(channel: str, message: str) -> Dict:
         raise ValueError(f"Failed to post message: {str(e)}")
 
 
-def get_threads(channel: str, limit: int = 20) -> List[Dict]:
+def get_threads(
+    channel: str, limit: int = 20, user_token: Optional[str] = None
+) -> List[Dict]:
     """
     Fetches threads from a Slack channel.
 
     Parameters:
     - channel (str): Slack channel ID or name (with or without #)
     - limit (int): Number of parent messages to inspect (default 20)
+    - user_token (Optional[str]): User's Slack token for multi-user mode
 
     Returns:
     - List of threads with parent message and replies
     """
     try:
-        channel_id = get_channel_id(channel)
-        join_channel_if_needed(channel_id)
+        channel_id = get_channel_id(channel, user_token)
+        join_channel_if_needed(channel_id, user_token)
+        c = get_client(user_token)
 
         # Step 1: Get channel messages
-        history = client.conversations_history(channel=channel_id, limit=limit)
+        history = c.conversations_history(channel=channel_id, limit=limit)
 
         threads = []
 
         for msg in history.get("messages", []):
             # Only messages that start threads
             if msg.get("reply_count", 0) > 0 and "ts" in msg:
-                replies_resp = client.conversations_replies(
-                    channel=channel_id, ts=msg["ts"]
-                )
+                replies_resp = c.conversations_replies(channel=channel_id, ts=msg["ts"])
 
                 replies = replies_resp.get("messages", [])
 
@@ -192,7 +231,9 @@ def get_threads(channel: str, limit: int = 20) -> List[Dict]:
         raise ValueError(f"Failed to fetch threads: {str(e)}")
 
 
-def reply_to_thread(channel: str, thread_ts: str, message: str) -> Dict:
+def reply_to_thread(
+    channel: str, thread_ts: str, message: str, user_token: Optional[str] = None
+) -> Dict:
     """
     Reply to a thread in a Slack channel.
 
@@ -200,15 +241,17 @@ def reply_to_thread(channel: str, thread_ts: str, message: str) -> Dict:
     - channel (str): Slack channel ID or name (with or without #)
     - thread_ts (str): Thread timestamp to reply to
     - message (str): Message text to post
+    - user_token (Optional[str]): User's Slack token for multi-user mode
 
     Returns:
     - Dictionary with channel, thread_ts, and timestamp of posted message
     """
     try:
-        channel_id = get_channel_id(channel)
-        join_channel_if_needed(channel_id)
+        channel_id = get_channel_id(channel, user_token)
+        join_channel_if_needed(channel_id, user_token)
 
-        response = client.chat_postMessage(
+        c = get_client(user_token)
+        response = c.chat_postMessage(
             channel=channel_id, text=message, thread_ts=thread_ts
         )
 
@@ -226,19 +269,25 @@ def reply_to_thread(channel: str, thread_ts: str, message: str) -> Dict:
         raise ValueError(f"Failed to reply to thread: {str(e)}")
 
 
-def search_messages(query: str, limit: int = 20) -> List[Dict]:
+def search_messages(
+    query: str, limit: int = 20, bot_token: Optional[str] = None
+) -> List[Dict]:
     """
     Search Slack messages using a query string.
 
     Parameters:
     - query (str): Text to search for
     - limit (int): Maximum number of results to return
+    - bot_token (Optional[str]): Bot token for search
 
     Returns:
     - List of matching messages with channel, user, text, and timestamp
     """
     try:
-        response = bot_client.search_messages(query=query, count=limit)
+        bc = get_bot_client(bot_token)
+        if not bc:
+            raise ValueError("Bot token not available for search")
+        response = bc.search_messages(query=query, count=limit)
 
         matches = response.get("messages", {}).get("matches", [])
 
@@ -263,12 +312,14 @@ def search_messages(query: str, limit: int = 20) -> List[Dict]:
         raise ValueError(f"Failed to search messages: {str(e)}")
 
 
-def summarize_channel_source(channel: str, limit: int = 50):
+def summarize_channel_source(
+    channel: str, limit: int = 50, user_token: Optional[str] = None
+):
     """
     Prepare Slack channel messages for LLM-based summarization.
     No LLM call happens here.
     """
-    messages = get_channel_messages(channel, limit)
+    messages = get_channel_messages(channel, limit, user_token)
 
     if not messages:
         return {"instructions": "No messages found in the channel.", "sampled_text": []}
