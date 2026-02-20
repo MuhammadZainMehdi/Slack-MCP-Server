@@ -101,6 +101,21 @@ async def auth_status():
     }
 
 
+import json
+import os
+
+
+# Serve server-card.json for Smithery scanning
+@api.get("/.well-known/mcp/server-card.json")
+async def server_card():
+    """Return server metadata for Smithery."""
+    card_path = os.path.join(os.path.dirname(__file__), "server-card.json")
+    if os.path.exists(card_path):
+        with open(card_path, "r") as f:
+            return JSONResponse(content=json.load(f))
+    return JSONResponse(content={"error": "Server card not found"}, status_code=404)
+
+
 # Token Middleware for MCP requests
 from starlette.applications import Starlette
 from starlette.routing import Route
