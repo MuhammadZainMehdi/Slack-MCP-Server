@@ -41,30 +41,17 @@ def generate_state(team_id: Optional[str] = None) -> str:
 
 def get_auth_url(state: str) -> str:
     """Generate Slack OAuth authorization URL."""
-    # Bot token scopes - required for MCP server operations
+    # Minimal bot token scopes
     bot_scopes = [
         "channels:read",
-        "channels:history",
         "chat:write",
-        "groups:read",
-        "groups:history",
-        "im:read",
-        "im:history",
-        "mpim:read",
-        "mpim:history",
-        "search:read",
         "users:read",
-        "users:read.email",
     ]
-
-    # User scopes - keep minimal
-    user_scopes = []
 
     url = (
         f"https://slack.com/oauth/v2/authorize?"
         f"client_id={SLACK_CLIENT_ID}&"
         f"scope={','.join(bot_scopes)}&"
-        f"user_scope={','.join(user_scopes)}&"
         f"state={state}&"
         f"redirect_uri={REDIRECT_URI}"
     )
