@@ -116,6 +116,27 @@ async def server_card():
     return JSONResponse(content={"error": "Server card not found"}, status_code=404)
 
 
+# Serve OAuth protected resource metadata for Smithery
+@api.get("/.well-known/oauth-protected-resource")
+async def oauth_resource():
+    """Return OAuth resource metadata."""
+    return JSONResponse(
+        {
+            "resource": "https://slack-mcp.up.railway.app",
+            "authorization_servers": ["https://auth.smithery.ai"],
+            "scopes_supported": [
+                "channels:read",
+                "channels:history",
+                "chat:write",
+                "groups:read",
+                "groups:history",
+                "search:read",
+                "users:read",
+            ],
+        }
+    )
+
+
 # Token Middleware for MCP requests
 from starlette.applications import Starlette
 from starlette.routing import Route
