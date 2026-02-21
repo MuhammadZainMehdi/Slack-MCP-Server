@@ -178,7 +178,7 @@ def extract_token(request: Request):
         request_token_var.set(token)
 
 
-# MCP routes - handle all MCP methods
+# MCP routes - handle all MCP methods at root
 @app.api_route("/", methods=["GET", "POST"])
 async def mcp_root(request: Request):
     extract_token(request)
@@ -191,7 +191,7 @@ async def mcp_path(request: Request):
     return await mcp_asgi_app(request.scope, request.receive, request._send)
 
 
-# OAuth endpoints
+# OAuth endpoints for Slack
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
@@ -230,7 +230,7 @@ async def auth_status():
     }
 
 
-# Metadata endpoints
+# Metadata endpoints for Smithery
 @app.get("/.well-known/mcp/server-card.json")
 async def server_card():
     card_path = os.path.join(os.path.dirname(__file__), "server-card.json")
