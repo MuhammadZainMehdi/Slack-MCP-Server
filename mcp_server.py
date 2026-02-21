@@ -4,9 +4,8 @@ import os
 import json
 import uvicorn
 from contextvars import ContextVar
-from fastapi import FastAPI, Query
-from fastapi.responses import RedirectResponse, JSONResponse
-from starlette.routing import Mount
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import RedirectResponse, JSONResponse, Response
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from typing import Optional
@@ -44,11 +43,11 @@ def get_team_id() -> Optional[str]:
     return request_team_var.get()
 
 
-# Create MCP server FIRST
+# Create MCP server
 mcp = FastMCP("SlackMCP", log_level="ERROR")
 
 
-# Define MCP tools BEFORE creating the app
+# Define MCP tools
 @mcp.tool(
     name="get_channel_messages", description="Fetch messages from a Slack channel"
 )
@@ -167,10 +166,10 @@ mcp_app = mcp.streamable_http_app()
 api = FastAPI(title="SlackMCP OAuth")
 
 
-# FastAPI routes for OAuth
+# FastAPI routes for OAuth - at /auth prefix
 @api.get("/")
 async def root():
-    return {"status": "ok", "message": "Slack MCP Server"}
+    return {"status": "ok", "message": "Slack MCP Server - OAuth at /auth"}
 
 
 @api.get("/health")
@@ -178,14 +177,14 @@ async def health():
     return {"status": "healthy"}
 
 
-@api.get("/auth/login")
+@api.get("/login")
 async def login():
     state = generate_state()
     auth_url = get_auth_url(state)
     return RedirectResponse(url=auth_url)
 
 
-@api.get("/auth/callback")
+@api.get("/callback")
 async def oauth_callback(code: str = Query(...), state: str = Query(...)):
     try:
         result = await exchange_code_for_token(code, state)
@@ -201,7 +200,7 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...)):
         return JSONResponse({"success": False, "error": str(e)}, status_code=400)
 
 
-@api.get("/auth/status")
+@api.get("/status")
 async def auth_status():
     teams = get_all_teams()
     return {
@@ -239,27 +238,103 @@ async def oauth_resource():
     )
 
 
-# Combine apps using FastAPI routing
-from starlette.applications import Starlette
-from starlette.routing import Route, Router
+# Mount FastAPI at /auth and MCP at root
+# Using a custom route to handle this
+from fastapi import FastAPI
+from starlette.routing import Route, Mount
+from starlette.responses import Response
 
 
-# Create combined router - MCP at root, FastAPI at /auth
-async def handle_mcp(request):
-    # Handle MCP requests at root
-    await mcp_app(request.scope, request.receive, request._send)
+async def mcp_handler(request: Request) -> Response:
+    """Handle MCP requests."""
+    # Extract auth header for token
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[7:]
+        # Find team from token
+        for tid, data in token_store.items():
+            if data.get("user_token") == token or data.get("bot_token") == token:
+                request_team_var.set(tid)
+                break
+        request_token_var.set(token)
+
+    # Get response from MCP app
+    # MCP app is ASGI - we need to handle it differently
+    # Use the mcp app directly
+    return await mcp_app(request.scope, request.receive, request._send)
 
 
-combined_router = Router(
-    routes=[
-        Mount("/auth", app=api),  # OAuth routes at /auth
-        Route("/", endpoint=handle_mcp),  # MCP at root
-    ]
-)
+# Simpler approach: Use FastAPI with MCP mounted
+# Create main app
+main_app = FastAPI()
 
 
-# Use combined router as app
-app = combined_router
+# Add MCP at root - catch all routes
+@main_app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def handle_all(path: str, request: Request):
+    """Handle MCP at root, except for /auth which goes to FastAPI."""
+    if path.startswith("auth/"):
+        # Let FastAPI handle auth routes
+        return await api(request.scope, request.receive, request._send)
+
+    # For MCP requests, extract token and handle
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[7:]
+        for tid, data in token_store.items():
+            if data.get("user_token") == token or data.get("bot_token") == token:
+                request_team_var.set(tid)
+                break
+        request_token_var.set(token)
+
+    return await mcp_app(request.scope, request.receive, request._send)
+
+
+# Also handle root path
+@main_app.get("/")
+@main_app.post("/")
+async def root_handler(request: Request):
+    return await mcp_app(request.scope, request.receive, request._send)
+
+
+# Add health and static endpoints directly
+@main_app.get("/health")
+async def health():
+    return {"status": "healthy"}
+
+
+@main_app.get("/.well-known/mcp/server-card.json")
+async def server_card():
+    card_path = os.path.join(os.path.dirname(__file__), "server-card.json")
+    if os.path.exists(card_path):
+        with open(card_path, "r") as f:
+            return JSONResponse(content=json.load(f))
+    return JSONResponse({"error": "Not found"}, status_code=404)
+
+
+@main_app.get("/.well-known/oauth-protected-resource")
+async def oauth_resource():
+    return JSONResponse(
+        {
+            "resource": "https://slack-mcp.up.railway.app",
+            "authorization_servers": ["https://auth.smithery.ai"],
+            "scopes_supported": [
+                "channels:read",
+                "channels:history",
+                "chat:write",
+                "groups:read",
+                "search:read",
+                "users:read",
+            ],
+        }
+    )
+
+
+# Also mount auth routes
+main_app.mount("/auth", api)
+
+
+app = main_app
 
 
 if __name__ == "__main__":
