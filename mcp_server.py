@@ -1,15 +1,7 @@
-# mcp_server.py - Slack MCP Server with OAuth
+# mcp_server.py
 
-import os
-import json
-import uvicorn
-from contextvars import ContextVar
-from fastapi import FastAPI, Query, Request
-from fastapi.responses import RedirectResponse, JSONResponse
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
-from typing import Optional
-
 from slack_tools import (
     get_channel_messages,
     list_channels,
@@ -21,243 +13,194 @@ from slack_tools import (
     extract_action_items,
 )
 
-from oauth_server import (
-    generate_state,
-    get_auth_url,
-    exchange_code_for_token,
-    get_token_for_team,
-    get_all_teams,
-    token_store,
-)
-
-# Token context variable
-request_token_var: ContextVar[Optional[str]] = ContextVar("request_token", default=None)
-request_team_var: ContextVar[Optional[str]] = ContextVar("request_team", default=None)
-
-
-def get_user_token() -> Optional[str]:
-    return request_token_var.get()
-
-
-def get_team_id() -> Optional[str]:
-    return request_team_var.get()
-
-
-# Create MCP server
+# Initialize MCP server
 mcp = FastMCP("SlackMCP", log_level="ERROR")
 
 
-# Define MCP tools
+# MCP Tools
 @mcp.tool(
-    name="get_channel_messages", description="Fetch messages from a Slack channel"
+    name="get_channel_messages",
+    description="Fetch the last messages from a Slack channel by name or ID",
 )
 def fetch_channel_messages(
     channel: str = Field(description="Channel name WITHOUT the # symbol"),
-    limit: int = Field(default=50, description="Number of messages"),
+    limit: int = Field(
+        default=50, description="Number of messages to fetch (default 50)"
+    ),
 ):
-    user_token = get_user_token()
-    team_id = get_team_id()
-    if team_id and not user_token:
-        team_data = get_token_for_team(team_id)
-        if team_data:
-            user_token = team_data.get("user_token")
-    return get_channel_messages(channel, limit, user_token)
+    """
+    MCP tool that fetches messages from Slack channel.
+    """
+    return get_channel_messages(channel, limit)
 
 
-@mcp.tool(name="list_channels", description="List all Slack channels")
+@mcp.tool(name="list_channels", description="List all channels the bot has access to")
 def fetch_channels():
-    user_token = get_user_token()
-    team_id = get_team_id()
-    if team_id and not user_token:
-        team_data = get_token_for_team(team_id)
-        if team_data:
-            user_token = team_data.get("user_token")
-    return list_channels(user_token=user_token)
+    """
+    MCP tool that lists Slack channels available to the bot.
+    """
+    return list_channels()
 
 
-@mcp.tool(name="post_message", description="Post a message to Slack")
+@mcp.tool(
+    name="post_message",
+    description="Post a message to a Slack channel. Parameters: channel (string), message (string)",
+)
 def send_message(
-    channel: str = Field(description="Channel name"),
-    message: str = Field(description="Message to post"),
+    channel: str = Field(description="Channel name WITHOUT the # symbol"),
+    message: str = Field(description="The text message to post to the channel"),
 ):
-    user_token = get_user_token()
-    team_id = get_team_id()
-    if team_id and not user_token:
-        team_data = get_token_for_team(team_id)
-        if team_data:
-            user_token = team_data.get("user_token")
-    return post_message(channel, message, user_token)
+    """
+    MCP tool that posts a message to a Slack channel.
+    """
+    return post_message(channel, message)
 
 
-@mcp.tool(name="get_threads", description="Get threads from a channel")
+@mcp.tool(
+    name="get_threads",
+    description="Fetch the threads from a Slack channel by name or ID",
+)
 def fetch_threads(
-    channel: str = Field(description="Channel name"),
-    limit: int = Field(default=20, description="Number of threads"),
+    channel: str = Field(description="Channel name WITHOUT the # symbol"),
+    limit: int = Field(
+        default=20, description="Number of threads to fetch (default 20)"
+    ),
 ):
-    user_token = get_user_token()
-    team_id = get_team_id()
-    if team_id and not user_token:
-        team_data = get_token_for_team(team_id)
-        if team_data:
-            user_token = team_data.get("user_token")
-    return get_threads(channel, limit, user_token)
+    """
+    MCP tool that fetches threads from a Slack channel.
+    """
+    return get_threads(channel, limit)
 
 
-@mcp.tool(name="reply_to_thread", description="Reply to a thread")
+@mcp.tool(
+    name="reply_to_thread",
+    description="Reply to a thread in a Slack channel. Parameters: channel (string), thread_ts (string), message (string)",
+)
 def reply_thread(
-    channel: str = Field(description="Channel name"),
-    thread_ts: str = Field(description="Thread timestamp"),
-    message: str = Field(description="Reply message"),
+    channel: str = Field(description="Channel name WITHOUT the # symbol"),
+    thread_ts: str = Field(
+        description="The thread timestamp to reply to (e.g., '1768831010.322079')"
+    ),
+    message: str = Field(
+        description="The text message to post as a reply in the thread"
+    ),
 ):
-    user_token = get_user_token()
-    team_id = get_team_id()
-    if team_id and not user_token:
-        team_data = get_token_for_team(team_id)
-        if team_data:
-            user_token = team_data.get("user_token")
-    return slack_reply_to_thread(channel, thread_ts, message, user_token)
+    """
+    MCP tool that replies to a thread in a Slack channel.
+    """
+    return slack_reply_to_thread(channel, thread_ts, message)
 
 
-@mcp.tool(name="search_messages", description="Search Slack messages")
+@mcp.tool(
+    name="search_messages",
+    description="Search messages across Slack channels by text query",
+)
 def search_slack_messages(
-    query: str = Field(description="Search query"),
-    limit: int = Field(default=20, description="Max results"),
+    query: str = Field(description="Search query text (e.g., 'deployment failure')"),
+    limit: int = Field(default=20, description="Maximum number of results"),
 ):
+    """
+    MCP tool that searches Slack messages.
+    """
     return search_messages(query, limit)
 
 
-@mcp.tool(name="summarize_channel", description="Summarize channel messages")
+@mcp.tool(
+    name="summarize_channel",
+    description=(
+        "Summarize recent messages from a Slack channel using LLM sampling. "
+        "The server prepares the data; the client performs completion."
+    ),
+)
 def summarize_channel(
-    channel: str = Field(description="Channel name"),
-    limit: int = Field(default=50, description="Number of messages"),
+    channel: str = Field(description="Slack channel name (without #) or channel ID"),
+    limit: int = Field(
+        default=50, description="Number of recent messages to include in the summary"
+    ),
 ):
-    user_token = get_user_token()
-    team_id = get_team_id()
-    if team_id and not user_token:
-        team_data = get_token_for_team(team_id)
-        if team_data:
-            user_token = team_data.get("user_token")
-    return summarize_channel_source(channel, limit, user_token)
+    """
+    MCP sampling tool:
+    - Server gathers messages
+    - Client LLM generates summary
+    """
+    return summarize_channel_source(channel, limit)
 
 
-@mcp.tool(name="extract_action_items", description="Extract action items")
+@mcp.tool(
+    name="extract_action_items",
+    description="Extract actionable items from a Slack channel",
+)
 def extract_items_tool(
-    channel: str = Field(description="Channel name"),
-    limit: int = Field(default=50, description="Number of messages"),
+    channel: str = Field(description="Channel name WITHOUT the # symbol"),
+    limit: int = Field(
+        default=50, description="Number of messages to fetch (default 50)"
+    ),
 ):
-    user_token = get_user_token()
-    team_id = get_team_id()
-    if team_id and not user_token:
-        team_data = get_token_for_team(team_id)
-        if team_data:
-            user_token = team_data.get("user_token")
-    messages = get_channel_messages(channel, limit, user_token)
+    """
+    MCP tool to extract action items from the latest messages of a Slack channel.
+    """
+    messages = get_channel_messages(channel, limit)
     if not messages:
         return {"status": "empty", "message": "No messages to analyze"}
     items = extract_action_items(messages)
     return {"channel": channel, "action_items": items}
 
 
-# Create MCP ASGI app
-mcp_asgi_app = mcp.streamable_http_app()
-
-
-# Create FastAPI app
-app = FastAPI(title="SlackMCP")
-
-
-# Extract token from request
-def extract_token(request: Request):
-    auth = request.headers.get("authorization", "")
-    if auth.startswith("Bearer "):
-        token = auth[7:]
-        for tid, data in token_store.items():
-            if data.get("user_token") == token or data.get("bot_token") == token:
-                request_team_var.set(tid)
-                break
-        request_token_var.set(token)
-
-
-# MCP routes - handle all MCP methods at root
-@app.api_route("/", methods=["GET", "POST"])
-async def mcp_root(request: Request):
-    extract_token(request)
-    return await mcp_asgi_app(request.scope, request.receive, request._send)
-
-
-@app.api_route("/mcp", methods=["GET", "POST"])
-async def mcp_path(request: Request):
-    extract_token(request)
-    return await mcp_asgi_app(request.scope, request.receive, request._send)
-
-
-# OAuth endpoints for Slack
-@app.get("/health")
-async def health():
-    return {"status": "healthy"}
-
-
-@app.get("/auth/login")
-async def login():
-    state = generate_state()
-    auth_url = get_auth_url(state)
-    return RedirectResponse(url=auth_url)
-
-
-@app.get("/auth/callback")
-async def oauth_callback(code: str = Query(...), state: str = Query(...)):
-    try:
-        result = await exchange_code_for_token(code, state)
-        return JSONResponse(
-            {
-                "success": True,
-                "message": "Successfully authenticated with Slack",
-                "team_id": result.get("team_id"),
-                "team_name": result.get("team_name"),
-            }
+# MCP Prompts
+@mcp.prompt(
+    name="daily_channel_summary",
+    description="Generate a daily summary of a Slack channel, focusing on important messages and decisions.",
+)
+async def daily_channel_summary(channel: str, limit: int = 50):
+    payload = summarize_channel_source(channel, limit)
+    if payload["sampled_text"]:
+        prompt_text = (
+            payload["instructions"] + "\n\n" + "\n".join(payload["sampled_text"])
         )
-    except Exception as e:
-        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+        return prompt_text
+    else:
+        return "No messages to summarize."
 
 
-@app.get("/auth/status")
-async def auth_status():
-    teams = get_all_teams()
-    return {
-        "teams": [
-            {"team_id": t, "team_name": d.get("team_name")} for t, d in teams.items()
-        ]
-    }
+@mcp.prompt(
+    name="action_items_summary",
+    description="Extract actionable items from a Slack channel or thread.",
+)
+async def action_items_summary(channel: str, limit: int = 50):
+    messages = get_channel_messages(channel, limit)
+    if not messages:
+        return "No messages in channel."
+    items = extract_action_items(messages)
+    if not items:
+        return "No action items found."
+    return items
 
 
-# Metadata endpoints for Smithery
-@app.get("/.well-known/mcp/server-card.json")
-async def server_card():
-    card_path = os.path.join(os.path.dirname(__file__), "server-card.json")
-    if os.path.exists(card_path):
-        with open(card_path, "r") as f:
-            return JSONResponse(content=json.load(f))
-    return JSONResponse({"error": "Not found"}, status_code=404)
-
-
-@app.get("/.well-known/oauth-protected-resource")
-async def oauth_resource():
-    return JSONResponse(
-        {
-            "resource": "https://slack-mcp.up.railway.app",
-            "authorization_servers": ["https://auth.smithery.ai"],
-            "scopes_supported": [
-                "channels:read",
-                "channels:history",
-                "chat:write",
-                "groups:read",
-                "search:read",
-                "users:read",
-            ],
-        }
+@mcp.prompt(
+    name="thread_followup",
+    description="Summarize a Slack thread and optionally generate a reply using client LLM.",
+)
+async def thread_followup(channel: str, thread_ts: str):
+    threads = get_threads(channel, limit=50)
+    thread = next(
+        (
+            t
+            for t in threads
+            if t.get("parent_ts") == thread_ts or t.get("thread_ts") == thread_ts
+        ),
+        None,
     )
+    if not thread:
+        return "Thread not found."
+    messages = [thread.get("parent_text", "")] + [
+        r.get("text", "") for r in thread.get("replies", [])
+    ]
+    prompt_text = (
+        "Summarize the thread and optionally suggest a reply:\n\n" + "\n".join(messages)
+    )
+    return prompt_text
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    # Run MCP server with stdio transport for CLI testing
+    mcp.run(transport="stdio")
