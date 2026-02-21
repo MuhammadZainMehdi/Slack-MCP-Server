@@ -151,8 +151,8 @@ async def http_middleware(request, call_next):
 mcp_app = mcp.streamable_http_app()
 
 
-# Mount MCP at /mcp
-api.mount("/mcp", mcp_app)
+# Mount MCP at root - this allows / and /mcp to work
+api.mount("/", mcp_app)
 
 
 # MCP Tools - using tokens from context

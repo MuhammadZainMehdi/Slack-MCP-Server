@@ -5,8 +5,8 @@
     "description": "MCP server for Slack - read/write messages, list channels, search, summarize, extract action items"
   },
   "authentication": {
-    "required": true,
-    "schemes": ["oauth2"]
+    "required": false,
+    "schemes": ["bearer"]
   },
   "tools": [
     {
